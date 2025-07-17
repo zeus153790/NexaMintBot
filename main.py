@@ -3,9 +3,6 @@ from keep_alive import keep_alive
 
 keep_alive()
 
-
-
-
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 )
@@ -23,7 +20,6 @@ from helpers import (
 user_data = {}         # Stores user name, language, MLBB ID, etc.
 user_orders = {}       # Stores current order info per user
 pending_orders = {}    # Track order status
-rejecting_order = {}  # key: admin_id, value: order_id
 
 # === STATES ===
 NAME, LANG, MLBB_ID, CATEGORY, DIAMOND, SCREENSHOT = range(6)
@@ -274,58 +270,16 @@ async def complete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(user_id, msg)
         await update.message.reply_text(texts["order_completed_admin"]["mm"].format(order_id=order_id))
 
-    async def handle_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-
-        admin_id = query.from_user.id
-        data = query.data  # like "reject_NXM-0001"
-        order_id = data.split("_")[1]
-
-        if order_id not in pending_orders:
-            await query.message.reply_text("❌ This order has already been handled.")
-            return
-
-        # Store that this admin is rejecting this specific order
-        rejecting_order[admin_id] = order_id
-
-        # ✅ Send message to ADMIN (not customer)
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text="📌 Order ကို ငြင်းပယ်ရန် အကြောင်းပြချက်ရေးပါ:"
-        )
-
-async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_id = update.message.from_user.id
-    reason = update.message.text
-
-    if admin_id not in rejecting_order:
-        await update.message.reply_text("❌ No order is pending rejection.")
+async def reject_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        await update.message.reply_text("⚠️ Usage: /rejectorder NXM-0001")
         return
-
-    order_id = rejecting_order.pop(admin_id)
+    order_id = args[0]
     user_id = pending_orders.pop(order_id, None)
-
-    if not user_id:
-        await update.message.reply_text("⚠️ Order not found.")
-        return
-
-    # Update order status
-    for order in user_orders.get(user_id, []):
-        if order["order_id"] == order_id:
-            order["status"] = "Rejected"
-
-    # Notify customer
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"❌ Your order {order_id} has been rejected.\n📄 Reason: {reason}"
-    )
-
-    # Confirm to admin
-    await update.message.reply_text(f"🗑️ Order {order_id} rejected successfully.")
-
-
-
+    if user_id:
+        await update.message.reply_text("📌 Now reply with the reason.")
+        context.user_data["reject_order_id"] = order_id
 
 # === Main Bot Setup ===
 def main():
@@ -352,11 +306,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("pendingorders", pendingorders))
     app.add_handler(CommandHandler("completeorder", complete_order))
-    app.add_handler(CallbackQueryHandler(handle_reject_callback, pattern=r"^reject_"))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_reject_reason))
-
-
-
+    app.add_handler(CommandHandler("rejectorder", reject_order))
 
     app.run_polling()
 
