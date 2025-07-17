@@ -308,16 +308,7 @@ def main():
     app.add_handler(CommandHandler("completeorder", complete_order))
     app.add_handler(CommandHandler("rejectorder", reject_order))
 
-
-
-import os
+    app.run_polling()
 
 if __name__ == "__main__":
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        webhook_path="/webhook",
-        webhook_url="https://nexamintbot.onrender.com/webhook"  # your render app link
-    )
-
-    
+    main()
