@@ -308,7 +308,7 @@ def main():
     app.add_handler(CommandHandler("completeorder", complete_order))
     app.add_handler(CommandHandler("rejectorder", reject_order))
 
-    import os
+
 
 import os
 
