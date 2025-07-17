@@ -310,28 +310,14 @@ def main():
 
     import os
 
+import os
+
 if __name__ == "__main__":
-    from telebot.types import Update
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        webhook_path="/webhook",
+        webhook_url="https://nexamintbot.onrender.com/webhook"  # your render app link
+    )
 
-    WEBHOOK_HOST = 'https://your-render-url.onrender.com'
-    WEBHOOK_URL = f"{WEBHOOK_HOST}/webhook"
-
-    app.remove_webhook()
-    app.set_webhook(url=WEBHOOK_URL)
-
-    from flask import Flask, request
-
-    flask_app = Flask(__name__)
-
-    @flask_app.route('/webhook', methods=['POST'])
-    def webhook():
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            update = Update.de_json(json_string)
-            app.process_new_updates([update])
-            return '', 200
-        else:
-            return 'Unauthorized', 403
-
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 10000)))
     
