@@ -7,15 +7,15 @@ BOT_TOKEN = "8003394770:AAGfx308bowIsW7btWpBP1mn_o-ciXulPL0"
 ADMIN_GROUP_ID = -1002530649712  # Telegram group where admin gets order alerts
 
 # === PAYMENT NUMBERS ===
-KBZ_PAY_NUMBER = "09978772558"
-WAVE_PAY_NUMBER = "09978772558"
+KBZ_PAY = "09978772558"
+WAVE_PAY = "09978772558"
 
 # === ORDER PREFIX ===
 ORDER_PREFIX = "NXM"
 
 # === PRICE DICTIONARY ===
 # Format: diamond_amount: price_in_MMK
-DIAMOND_PRICES = {
+PRICES = {
     # 💎 Regular Diamonds
     11: 1000,
     22: 2000,
