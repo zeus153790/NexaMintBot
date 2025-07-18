@@ -37,3 +37,16 @@ def format_package(diamond):
     elif "+" in diamond:
         return f"🎁 {diamond} Bonus"
     return str(diamond)
+
+# ✅ Validate if uploaded screenshot is likely from KBZPay or WavePay
+def is_valid_screenshot(file):
+    if file.mime_type not in ["image/jpeg", "image/png"]:
+        return False
+
+    filename = getattr(file, "file_name", "")
+    keywords = ["kbz", "wave", "payment", "screenshot"]
+    return any(keyword in filename.lower() for keyword in keywords)
+
+# ⏱️ Estimated delivery time message
+def get_estimated_time():
+    return "⏳ Estimated Delivery: 5–10 minutes after payment confirmation"
