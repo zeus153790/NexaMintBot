@@ -1,6 +1,6 @@
 # languages.py
 
-texts = {
+TEXT = {
     "start": {
         "mm": "👋 မင်္ဂလာပါ။ NexaMint မှကြိုဆိုပါတယ်။\n\nကျေးဇူးပြု၍ သင့်နာမည်ကို ဖြည့်ပါ👇",
         "en": "👋 Hello! Welcome to NexaMint.\n\nPlease enter your name to get started 👇"
@@ -39,7 +39,7 @@ texts = {
     },
     "upload_screenshot": {
         "mm": "📤 ကျေးဇူးပြု၍ KBZPay သို့မဟုတ် WavePay Screenshot ကို upload လုပ်ပါ\n\nKBZPay - 09978772558 Min Zayar Khant\nWavePay - 09978772558 Shwe Yi Win",
-        "en": "📤 Please upload the KBZPay or WavePay payment screenshot"
+        "en": "📤 Please upload the KBZPay or WavePay payment screenshot\n\nKBZPay - 09978772558 Min Zayar Khant\nWavePay - 09978772558 Shwe Yi Win"
     },
     "confirming_order": {
         "mm": "📝 အော်ဒါကို အတည်ပြုနေသည်...",
