@@ -187,7 +187,7 @@ def main():
         },
         fallbacks=[]
     )
-import os
+
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_approve, pattern=r"^approve_"))
     app.add_handler(CallbackQueryHandler(handle_reject, pattern=r"^reject_"))
@@ -197,6 +197,6 @@ import os
         webhook_path="/webhook",
         webhook_url="https://nexamint-bot.onrender.com/webhook"  # ✅ Your Render URL
     )
-
+import os
 
 if __name__ == "__main__":
