@@ -170,9 +170,6 @@ async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 # Start app
 import asyncio
 
-def keep_alive():
-    from flask import Flask
-    app = Flask('')
 
     @app.route('/')
     def home():
@@ -181,7 +178,6 @@ def keep_alive():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
 async def main():
-    keep_alive()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
