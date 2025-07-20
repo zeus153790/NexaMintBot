@@ -187,17 +187,16 @@ def main():
         },
         fallbacks=[]
     )
-
+import os
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_approve, pattern=r"^approve_"))
     app.add_handler(CallbackQueryHandler(handle_reject, pattern=r"^reject_"))
-
-import os
-
-if __name__ == "__main__":
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8080)),   # ✅ Use 8080 (Render default)
         webhook_path="/webhook",
         webhook_url="https://nexamint-bot.onrender.com/webhook"  # ✅ Your Render URL
     )
+
+
+if __name__ == "__main__":
