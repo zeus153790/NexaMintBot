@@ -170,11 +170,6 @@ async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 # Start app
 import asyncio
 
-    def home():
-        return "NexaMint Bot is running!"
-
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-
 async def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
