@@ -197,7 +197,7 @@ def main():
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8080)),
         webhook_path="/webhook",
-        webhook_url="https://nexamintbot.onrender.com/webhook"  # <- your public Render URL
+        webhook_url="https://nexamint-bot.onrender.com/webhook"  # <- your public Render URL
     )
 
 if __name__ == "__main__":
