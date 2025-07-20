@@ -6,7 +6,6 @@ from telegram.ext import (
 from config import BOT_TOKEN, ADMIN_GROUP_ID, PRICES, KBZ_PAY, WAVE_PAY
 from helpers import generate_order_id, is_valid_mlbb_id, is_valid_screenshot, get_estimated_time
 from languages import TEXT
-from keep_alive import keep_alive
 import os
 
 # States for ConversationHandler
