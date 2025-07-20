@@ -1,12 +1,13 @@
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, ConversationHandler,
     ContextTypes, filters
 )
 from config import BOT_TOKEN, ADMIN_GROUP_ID, PRICES, KBZ_PAY, WAVE_PAY
-from helpers import generate_order_id, is_valid_mlbb_id, is_valid_screenshot, get_estimated_time
+from helpers import generate_order_id, is_valid_mlbb_id
 from languages import TEXT
 import os
+import asyncio
 
 # States for ConversationHandler
 NAME, LANG, MLBB_ID, CATEGORY, DIAMOND, SCREENSHOT = range(6)
@@ -18,7 +19,6 @@ order_history = {}
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data[user_id] = {}
-
     await update.message.reply_text(TEXT["ask_name"])
     return NAME
 
@@ -45,18 +45,18 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(TEXT["ask_mlbb_id"][lang])
     return MLBB_ID
 
-# Save MLBB ID + Zone
+# Save MLBB ID
 async def save_mlbb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-
     lang = user_data[user_id]["lang"]
+
     if not is_valid_mlbb_id(text):
         await update.message.reply_text(TEXT["invalid_id"][lang])
         return MLBB_ID
 
     user_data[user_id]["mlbb_id"] = text
-    # Category menu
+
     keyboard = [
         [InlineKeyboardButton("💎 Regular", callback_data="regular")],
         [InlineKeyboardButton("🔄 Weekly Pass", callback_data="weekly")],
@@ -74,7 +74,6 @@ async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[user_id]["category"] = category
     lang = user_data[user_id]["lang"]
 
-    # Create diamond options based on selected category
     buttons = []
     for amount, price in PRICES[category].items():
         buttons.append([InlineKeyboardButton(f"{amount} ➤ {price} Ks", callback_data=amount)])
@@ -90,7 +89,6 @@ async def select_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user_data[user_id]["lang"]
     user_data[user_id]["diamond"] = diamond
 
-    # Ask for payment screenshot
     await query.message.reply_text(TEXT["ask_screenshot"][lang])
     return SCREENSHOT
 
@@ -101,11 +99,6 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     photo = update.message.photo[-1]
     file_id = photo.file_id
 
-    if not is_valid_screenshot(update.message):
-        await update.message.reply_text(TEXT["invalid_screenshot"][lang])
-        return SCREENSHOT
-
-    # Generate order
     order_id = generate_order_id()
     user_data[user_id]["order_id"] = order_id
     order_history.setdefault(user_id, []).append(order_id)
@@ -116,14 +109,12 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
         diamond=user_data[user_id]["diamond"],
         category=user_data[user_id]["category"].capitalize(),
         payment="KBZPay / WavePay",
-        time=get_estimated_time(),
+        time="5-15 minutes",
         order_id=order_id
     )
 
-    # Send to user
     await update.message.reply_text(summary)
 
-    # Send to admin group
     buttons = [
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_id}"),
@@ -167,36 +158,30 @@ async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(f"❌ Order {order_id} has been rejected with reason: {reason}")
     return ConversationHandler.END
 
-# Start app
-import asyncio
-
+# Start bot with webhook
 async def main():
-
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # ✅ Set webhook manually
     await app.bot.set_webhook("https://nexamint-bot.onrender.com/webhook")
 
-    # All your handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, save_name)],
-            LANG:     [CallbackQueryHandler(set_language)],
-            MLBB_ID:  [MessageHandler(filters.TEXT & ~filters.COMMAND, save_mlbb)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_name)],
+            LANG: [CallbackQueryHandler(set_language)],
+            MLBB_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_mlbb)],
             CATEGORY: [CallbackQueryHandler(select_category)],
-            DIAMOND:  [CallbackQueryHandler(select_diamond)],
+            DIAMOND: [CallbackQueryHandler(select_diamond)],
             SCREENSHOT: [MessageHandler(filters.PHOTO, receive_screenshot)],
             "REJECT_REASON": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reject_reason)],
         },
         fallbacks=[]
     )
-    
+
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_approve, pattern=r"^approve_"))
     app.add_handler(CallbackQueryHandler(handle_reject, pattern=r"^reject_"))
 
-    # ✅ Start webhook server
     await app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
