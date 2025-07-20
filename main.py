@@ -169,11 +169,27 @@ async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 # Start app
-def main():
+import asyncio
+
+def keep_alive():
+    from flask import Flask
+    app = Flask('')
+
+    @app.route('/')
+    def home():
+        return "NexaMint Bot is running!"
+
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
+async def main():
     keep_alive()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # ✅ Set webhook manually
+    await app.bot.set_webhook("https://nexamint-bot.onrender.com/webhook")
+
+    # All your handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -188,20 +204,16 @@ def main():
         fallbacks=[]
     )
     
-    
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_approve, pattern=r"^approve_"))
     app.add_handler(CallbackQueryHandler(handle_reject, pattern=r"^reject_"))
 
-    import os
-    app.run_webhook(
+    # ✅ Start webhook server
+    await app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),   # ✅ Use 8080 (Render default)
-        webhook_path="/webhook",
-        webhook_url="https://nexamint-bot.onrender.com/webhook"  # ✅ Your Render URL
+        port=int(os.environ.get("PORT", 8080)),
+        webhook_path="/webhook"
     )
 
-
 if __name__ == "__main__":
-    main()
-    
+    asyncio.run(main())
