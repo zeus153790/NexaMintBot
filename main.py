@@ -211,7 +211,7 @@ async def main():
     # ✅ Start webhook server
     await app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
+        port=int(os.environ.get("PORT", 10000)),
         webhook_path="/webhook"
     )
 
