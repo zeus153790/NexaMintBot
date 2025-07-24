@@ -631,7 +631,7 @@ async def complete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Main function
 def main():
     application = (
-    Application.builder()
+    application.builder()
     .token(BOT_TOKEN)
     .arbitrary_callback_data(True)  # Add this line
     .build()
