@@ -1,192 +1,522 @@
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+import logging
+import re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler, ConversationHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ConversationHandler
 )
-from config import BOT_TOKEN, ADMIN_GROUP_ID, PRICES, KBZ_PAY, WAVE_PAY
-from helpers import generate_order_id, is_valid_mlbb_id
-from languages import TEXT
-import os
-import asyncio
+from config import BOT_TOKEN, ADMIN_GROUP_ID, ORDER_STATUS, DIAMOND_PRICES
+import languages
+import helpers
+from datetime import datetime
 
-# States for ConversationHandler
-NAME, LANG, MLBB_ID, CATEGORY, DIAMOND, SCREENSHOT = range(6)
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-user_data = {}
-order_history = {}
+# Conversation states
+NAME, LANGUAGE, MAIN_MENU, MLBB_ID, CATEGORY, PACKAGE, PAYMENT, CONFIRM_ORDER = range(8)
+ADMIN_REJECT_REASON = 9
 
-# /start command
+# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data[user_id] = {}
-    await update.message.reply_text(TEXT["ask_name"])
-    return NAME
+    user = update.effective_user
+    user_data = helpers.get_user_data(user.id)
 
-# Save name
-async def save_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data[user_id]["name"] = update.message.text
+    if user_data:
+        lang = user_data.get('language', 'en')
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=languages.LANGUAGES[lang]['main_menu'].format(user_data['name']),
+            reply_markup=main_menu_keyboard(lang)
+        )
+        return MAIN_MENU
+    else:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=languages.LANGUAGES['en']['welcome']
+        )
+        return NAME
+
+# Name handler
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text
+    context.user_data['name'] = name
 
     keyboard = [
-        [InlineKeyboardButton("🇲🇲 မြန်မာ", callback_data="mm")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="eng")]
+        [
+            InlineKeyboardButton("🇲🇲 Myanmar", callback_data='my'),
+            InlineKeyboardButton("🇬🇧 English", callback_data='en')
+        ]
     ]
-    await update.message.reply_text(TEXT["choose_lang"], reply_markup=InlineKeyboardMarkup(keyboard))
-    return LANG
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-# Set language
+    await update.message.reply_text(
+        languages.LANGUAGES['en']['lang_select'],
+        reply_markup=reply_markup
+    )
+    return LANGUAGE
+
+# Language handler
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
-    lang = query.data
+    language = query.data
 
-    user_data[user_id]["lang"] = lang
-    await query.message.reply_text(TEXT["ask_mlbb_id"][lang])
-    return MLBB_ID
+    user = query.from_user
+    user_data = {
+        'id': user.id,
+        'name': context.user_data['name'],
+        'language': language,
+        'username': user.username
+    }
+    helpers.save_user_data(user.id, user_data)
 
-# Save MLBB ID
-async def save_mlbb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text
-    lang = user_data[user_id]["lang"]
+    await query.edit_message_text(
+        text=languages.LANGUAGES[language]['main_menu'].format(user_data['name']),
+        reply_markup=main_menu_keyboard(language)
+    )
+    return MAIN_MENU
 
-    if not is_valid_mlbb_id(text):
-        await update.message.reply_text(TEXT["invalid_id"][lang])
+# Main menu keyboard
+def main_menu_keyboard(lang):
+    keyboard = [
+        [InlineKeyboardButton("💎 Order Diamonds", callback_data='order')],
+        [InlineKeyboardButton("📦 Check Order", callback_data='check_order')],
+        [InlineKeyboardButton("📜 My Orders", callback_data='my_orders')],
+        [InlineKeyboardButton("❓ Help", callback_data='help')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# Start order process
+async def start_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_data = helpers.get_user_data(query.from_user.id)
+    lang = user_data['language']
+
+    if 'mlbb_id' in user_data and user_data['mlbb_id']:
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Use Saved", callback_data='use_saved'),
+                InlineKeyboardButton("🆕 New ID", callback_data='new_id')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text="Use saved MLBB ID: {}?".format(user_data['mlbb_id']),
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(languages.LANGUAGES[lang]['enter_mlbb'])
         return MLBB_ID
 
-    user_data[user_id]["mlbb_id"] = text
+# MLBB ID handler
+async def get_mlbb_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.message.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
 
+    if not validate_mlbb(text):
+        await update.message.reply_text(languages.LANGUAGES[lang]['invalid_mlbb'])
+        return MLBB_ID
+
+    # Save MLBB ID for future orders
+    user_data['mlbb_id'] = text
+    helpers.save_user_data(user_id, user_data)
+
+    # Create category buttons with proper mapping
     keyboard = [
-        [InlineKeyboardButton("💎 Regular", callback_data="regular")],
-        [InlineKeyboardButton("🔄 Weekly Pass", callback_data="weekly")],
-        [InlineKeyboardButton("🎁 First Recharge Bonus", callback_data="bonus")]
+        [
+            InlineKeyboardButton(
+                languages.LANGUAGES[lang]['category_regular'], 
+                callback_data='regular'
+            ),
+            InlineKeyboardButton(
+                languages.LANGUAGES[lang]['category_weekly'], 
+                callback_data='weekly'
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                languages.LANGUAGES[lang]['category_bonus'], 
+                callback_data='bonus'
+            )
+        ]
     ]
-    await update.message.reply_text(TEXT["choose_category"][lang], reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        languages.LANGUAGES[lang]['diamond_category'],
+        reply_markup=reply_markup
+    )
     return CATEGORY
 
-# Category selected
+# Validate MLBB format
+def validate_mlbb(text):
+    pattern = r'^\d+\s*\(\d+\)$'
+    return bool(re.match(pattern, text))
+
+# Category handler
 async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     category = query.data
-    user_id = query.from_user.id
-    user_data[user_id]["category"] = category
-    lang = user_data[user_id]["lang"]
 
-    buttons = []
-    for amount, price in PRICES[category].items():
-        buttons.append([InlineKeyboardButton(f"{amount} ➤ {price} Ks", callback_data=amount)])
-    await query.message.reply_text(TEXT["choose_diamond"][lang], reply_markup=InlineKeyboardMarkup(buttons))
-    return DIAMOND
+    if category not in DIAMOND_PRICES:
+        user_data = helpers.get_user_data(query.from_user.id)
+        lang = user_data['language']
+        await query.edit_message_text(languages.LANGUAGES[lang]['invalid_category'])
+        return CATEGORY
 
-# Diamond selected
-async def select_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['category'] = category
+
+    user_data = helpers.get_user_data(query.from_user.id)
+    lang = user_data['language']
+
+    # Get packages for selected category
+    packages = list(DIAMOND_PRICES[category].keys())
+    keyboard = helpers.create_keyboard(packages)
+
+    await query.edit_message_text(
+        text=languages.LANGUAGES[lang]['choose_package'],
+        reply_markup=keyboard
+    )
+    return PACKAGE
+
+# Package handler
+async def select_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    diamond = query.data
-    user_id = query.from_user.id
-    lang = user_data[user_id]["lang"]
-    user_data[user_id]["diamond"] = diamond
+    package = query.data
+    category = context.user_data['category']
 
-    await query.message.reply_text(TEXT["ask_screenshot"][lang])
-    return SCREENSHOT
+    # Save package and calculate price
+    context.user_data['package'] = package
+    context.user_data['price'] = DIAMOND_PRICES[category][package]
 
-# Screenshot received
-async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = user_data[user_id]["lang"]
-    photo = update.message.photo[-1]
-    file_id = photo.file_id
+    user_data = helpers.get_user_data(query.from_user.id)
+    lang = user_data['language']
 
-    order_id = generate_order_id()
-    user_data[user_id]["order_id"] = order_id
-    order_history.setdefault(user_id, []).append(order_id)
+    await query.edit_message_text(
+        text=languages.LANGUAGES[lang]['upload_payment']
+    )
+    return PAYMENT
 
-    summary = TEXT["order_summary"][lang].format(
-        name=user_data[user_id]["name"],
-        mlbb=user_data[user_id]["mlbb_id"],
-        diamond=user_data[user_id]["diamond"],
-        category=user_data[user_id]["category"].capitalize(),
-        payment="KBZPay / WavePay",
-        time="5-15 minutes",
-        order_id=order_id
+# Payment screenshot handler
+async def get_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # For simplicity, skipping validation per request
+    context.user_data['payment_photo'] = update.message.photo[-1].file_id
+
+    user_id = update.message.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    # Generate order summary
+    order_id = helpers.generate_order_id()
+    context.user_data['order_id'] = order_id
+
+    order_summary = languages.LANGUAGES[lang]['order_confirm'].format(
+        order_id,
+        context.user_data['package'],
+        helpers.format_price(context.user_data['price'])
     )
 
-    await update.message.reply_text(summary)
-
-    buttons = [
+    keyboard = [
         [
-            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"reject_{order_id}")
+            InlineKeyboardButton("✅ Confirm", callback_data='confirm_order'),
+            InlineKeyboardButton("❌ Cancel", callback_data='cancel_order')
         ]
     ]
-    admin_text = f"🔔 New Order from @{update.effective_user.username or 'NoUsername'}\n"
-    admin_text += f"Order ID: {order_id}\n"
-    admin_text += f"MLBB ID: {user_data[user_id]['mlbb_id']}\n"
-    admin_text += f"Diamonds: {user_data[user_id]['diamond']}"
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await context.bot.send_photo(
+        chat_id=update.effective_chat.id,
+        photo=context.user_data['payment_photo'],
+        caption=order_summary,
+        reply_markup=reply_markup
+    )
+    return CONFIRM_ORDER
+
+# Order confirmation
+async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    # Save order
+    order = {
+        'order_id': context.user_data['order_id'],
+        'user_id': user_id,
+        'mlbb_id': user_data['mlbb_id'],
+        'category': context.user_data['category'],
+        'package': context.user_data['package'],
+        'price': context.user_data['price'],
+        'payment_photo': context.user_data['payment_photo'],
+        'status': ORDER_STATUS['pending'],
+        'date': datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    helpers.save_order(order)
+
+    # Notify admin
+    admin_text = languages.LANGUAGES['en']['admin_notification'].format(
+        f"@{user_data['username']}" if user_data['username'] else user_data['name'],
+        order['order_id'],
+        order['mlbb_id'],
+        order['package'],
+        helpers.format_price(order['price'])
+    )
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order['order_id']}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"reject_{order['order_id']}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
     await context.bot.send_photo(
         chat_id=ADMIN_GROUP_ID,
-        photo=file_id,
+        photo=order['payment_photo'],
         caption=admin_text,
-        reply_markup=InlineKeyboardMarkup(buttons)
+        reply_markup=reply_markup
     )
 
+    # Confirm to user
+    await query.edit_message_caption(
+        caption=languages.LANGUAGES[lang]['order_success']
+    )
     return ConversationHandler.END
 
-# Approve order
-async def handle_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Admin approve order
+async def admin_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    order_id = query.data.split("_")[1]
-    await query.edit_message_caption(caption=f"✅ Order {order_id} approved.")
+    order_id = query.data.split('_')[1]
 
-# Reject order - ask reason
-async def handle_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    helpers.update_order_status(order_id, ORDER_STATUS['paid'])
+
+    order = helpers.get_order(order_id)
+    user_data = helpers.get_user_data(order['user_id'])
+    lang = user_data['language']
+
+    # Notify user
+    await context.bot.send_message(
+        chat_id=order['user_id'],
+        text=f"✅ Your order {order_id} has been approved! Diamonds will be delivered soon."
+    )
+
+    await query.edit_message_caption(
+        caption=f"✅ Order {order_id} approved"
+    )
+
+# Admin reject order
+async def admin_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    order_id = query.data.split("_")[1]
-    context.user_data["reject_order"] = order_id
-    await query.message.reply_text("📌 Order ကို ငြင်းပယ်ရန် အကြောင်းပြချက်ရေးပါ:")
-    return "REJECT_REASON"
+    order_id = query.data.split('_')[1]
+    context.user_data['reject_order_id'] = order_id
 
-# Handle reject reason
-async def handle_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await query.edit_message_caption(
+        caption=languages.LANGUAGES['en']['reject_reason']
+    )
+    return ADMIN_REJECT_REASON
+
+# Admin reject reason handler
+async def reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = update.message.text
-    order_id = context.user_data.get("reject_order")
-    await update.message.reply_text(f"❌ Order {order_id} has been rejected with reason: {reason}")
+    order_id = context.user_data['reject_order_id']
+
+    helpers.update_order_status(order_id, ORDER_STATUS['rejected'], reason)
+
+    order = helpers.get_order(order_id)
+    user_data = helpers.get_user_data(order['user_id'])
+    lang = user_data['language']
+
+    # Notify user
+    await context.bot.send_message(
+        chat_id=order['user_id'],
+        text=languages.LANGUAGES[lang]['order_rejected'].format(order_id, reason)
+    )
+
+    await update.message.reply_text(
+        text=languages.LANGUAGES['en']['order_rejected'].format(order_id, reason)
+    )
     return ConversationHandler.END
 
-# Start bot with webhook
-async def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+# Check order command
+async def check_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
 
-    await app.bot.set_webhook("https://nexamint-bot.onrender.com/webhook")
+    orders = helpers.get_user_orders(user_id)
+    if not orders:
+        await update.message.reply_text(languages.LANGUAGES[lang]['no_orders'])
+        return
 
+    # Get latest order
+    latest_order = sorted(orders, key=lambda x: x['date'], reverse=True)[0]
+
+    response = languages.LANGUAGES[lang]['order_details'].format(
+        latest_order['order_id'],
+        latest_order['status'],
+        latest_order['package'],
+        helpers.format_price(latest_order['price']),
+        latest_order['date']
+    )
+
+    await update.message.reply_text(response)
+
+# My orders command
+async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    orders = helpers.get_user_orders(user_id)[-5:]  # Last 5 orders
+    if not orders:
+        await update.message.reply_text(languages.LANGUAGES[lang]['no_orders'])
+        return
+
+    response = "📦 Your Last Orders:\n\n"
+    for order in orders:
+        response += languages.LANGUAGES[lang]['order_details'].format(
+            order['order_id'],
+            order['status'],
+            order['package'],
+            helpers.format_price(order['price']),
+            order['date']
+        ) + "\n\n"
+
+    await update.message.reply_text(response)
+
+# Help command
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    await update.message.reply_text(
+        languages.LANGUAGES[lang]['help_text'],
+        disable_web_page_preview=True
+    )
+
+# Admin pending orders
+async def pending_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != ADMIN_GROUP_ID:
+        return
+
+    orders = helpers.get_pending_orders()
+    if not orders:
+        await update.message.reply_text("No pending orders")
+        return
+
+    response = languages.LANGUAGES['en']['pending_orders'] + "\n\n"
+    for order in orders:
+        response += f"Order ID: {order['order_id']}\n"
+        response += f"User: {order['user_id']}\n"
+        response += f"Diamonds: {order['package']}\n"
+        response += f"Price: {helpers.format_price(order['price'])} MMK\n\n"
+
+    await update.message.reply_text(response)
+
+# Admin complete order
+async def complete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != ADMIN_GROUP_ID:
+        return
+
+    try:
+        order_id = context.args[0]
+        if helpers.update_order_status(order_id, ORDER_STATUS['completed']):
+            order = helpers.get_order(order_id)
+            user_data = helpers.get_user_data(order['user_id'])
+            lang = user_data['language']
+
+            # Notify user
+            await context.bot.send_message(
+                chat_id=order['user_id'],
+                text=languages.LANGUAGES[lang]['order_completed'].format(order_id)
+            )
+
+            await update.message.reply_text(
+                languages.LANGUAGES['en']['order_completed'].format(order_id)
+            )
+        else:
+            await update.message.reply_text(
+                languages.LANGUAGES['en']['order_not_found']
+            )
+    except IndexError:
+        await update.message.reply_text("Usage: /completeorder NXM-0001")
+
+# Main function
+def main():
+    # Initialize data files
+    helpers.save_data({"users": {}, "orders": {}, "next_order_id": 1}, helpers.ORDERS_FILE)
+    helpers.save_data({}, helpers.USER_DATA_FILE)
+
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Conversation handler for customer flow
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[CommandHandler('start', start)],
         states={
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_name)],
-            LANG: [CallbackQueryHandler(set_language)],
-            MLBB_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_mlbb)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            LANGUAGE: [CallbackQueryHandler(set_language)],
+            MAIN_MENU: [
+                CallbackQueryHandler(start_order, pattern='order'),
+                CallbackQueryHandler(check_order, pattern='check_order'),
+                CallbackQueryHandler(my_orders, pattern='my_orders'),
+                CallbackQueryHandler(help_command, pattern='help')
+            ],
+            MLBB_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_mlbb_id)],
             CATEGORY: [CallbackQueryHandler(select_category)],
-            DIAMOND: [CallbackQueryHandler(select_diamond)],
-            SCREENSHOT: [MessageHandler(filters.PHOTO, receive_screenshot)],
-            "REJECT_REASON": [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reject_reason)],
+            PACKAGE: [CallbackQueryHandler(select_package)],
+            PAYMENT: [MessageHandler(filters.PHOTO, get_payment)],
+            CONFIRM_ORDER: [CallbackQueryHandler(confirm_order, pattern='confirm_order')]
         },
         fallbacks=[]
     )
 
-    app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(handle_approve, pattern=r"^approve_"))
-    app.add_handler(CallbackQueryHandler(handle_reject, pattern=r"^reject_"))
+    application.add_handler(conv_handler)
 
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        webhook_path="/webhook"
+    # Admin handlers
+    application.add_handler(CommandHandler('pendingorders', pending_orders))
+    application.add_handler(CommandHandler('completeorder', complete_order))
+
+    # Callback handlers
+    application.add_handler(CallbackQueryHandler(admin_approve, pattern=r'^approve_'))
+    application.add_handler(CallbackQueryHandler(admin_reject, pattern=r'^reject_'))
+
+    # Command handlers
+    application.add_handler(CommandHandler('checkorder', check_order))
+    application.add_handler(CommandHandler('orders', my_orders))
+    application.add_handler(CommandHandler('help', help_command))
+
+    # Rejection reason handler
+    rejection_handler = MessageHandler(
+        filters.TEXT & ~filters.COMMAND, 
+        reject_reason
     )
+    application.add_handler(rejection_handler)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # Start keep_alive for Replit
+    from keep_alive import keep_alive
+    keep_alive()
+
+    # Start the bot
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
