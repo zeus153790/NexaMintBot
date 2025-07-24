@@ -173,7 +173,7 @@ async def get_mlbb_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = helpers.get_user_data(user_id)
     lang = user_data['language']
 
-    if not helpers.validate_mlbb(text):
+    if not validate_mlbb(text):
         await update.message.reply_text(languages.LANGUAGES[lang]['invalid_mlbb'])
         return MLBB_ID
 
@@ -207,6 +207,11 @@ async def get_mlbb_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
     return CATEGORY
+
+# Validate MLBB format
+def validate_mlbb(text):
+    pattern = r'^\d+\s*\(\d+\)$'
+    return bool(re.match(pattern, text))
 
 # Category handler
 async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -244,7 +249,7 @@ async def select_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Save package and calculate price
     context.user_data['package'] = package
-    context.user_data['price'] = helpers.get_diamond_price(category, package)
+    context.user_data['price'] = DIAMOND_PRICES[category][package]
 
     user_data = helpers.get_user_data(query.from_user.id)
     lang = user_data['language']
@@ -668,12 +673,9 @@ def main():
     application.add_handler(CommandHandler('help', help_command))
 
     # Rejection reason handler
-    rejection_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_reject, pattern=r'^reject_')],
-        states={
-            ADMIN_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, reject_reason)]
-        },
-        fallbacks=[]
+    rejection_handler = MessageHandler(
+        filters.TEXT & ~filters.COMMAND, 
+        reject_reason
     )
     application.add_handler(rejection_handler)
 
