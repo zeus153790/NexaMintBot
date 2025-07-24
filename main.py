@@ -1,5 +1,6 @@
 import logging
 import re
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -42,8 +43,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=languages.LANGUAGES['en']['welcome']
-        )
+            text=languages.LANGUAGES['en']['welcome'])
+        
         return NAME
 
 # Name handler
@@ -112,21 +113,67 @@ async def start_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text="Use saved MLBB ID: {}?".format(user_data['mlbb_id']),
+            text=f"Use saved MLBB ID: {user_data['mlbb_id']}?",
             reply_markup=reply_markup
         )
+        return MLBB_ID  # Stay in the order flow
     else:
+        await query.edit_message_text(languages.LANGUAGES[lang]['enter_mlbb'])
+        return MLBB_ID
+
+# Handle saved ID choice
+async def handle_saved_id_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    if choice == 'use_saved':
+        # Proceed to category selection
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    languages.LANGUAGES[lang]['category_regular'], 
+                    callback_data='regular'
+                ),
+                InlineKeyboardButton(
+                    languages.LANGUAGES[lang]['category_weekly'], 
+                    callback_data='weekly'
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    languages.LANGUAGES[lang]['category_bonus'], 
+                    callback_data='bonus'
+                )
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            languages.LANGUAGES[lang]['diamond_category'],
+            reply_markup=reply_markup
+        )
+        return CATEGORY
+    else:  # new_id
         await query.edit_message_text(languages.LANGUAGES[lang]['enter_mlbb'])
         return MLBB_ID
 
 # MLBB ID handler
 async def get_mlbb_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if this is a callback from the saved ID choice
+    if update.callback_query:
+        return await handle_saved_id_choice(update, context)
+
+    # It's a text message with new ID
     text = update.message.text
     user_id = update.message.from_user.id
     user_data = helpers.get_user_data(user_id)
     lang = user_data['language']
 
-    if not validate_mlbb(text):
+    if not helpers.validate_mlbb(text):
         await update.message.reply_text(languages.LANGUAGES[lang]['invalid_mlbb'])
         return MLBB_ID
 
@@ -160,11 +207,6 @@ async def get_mlbb_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
     return CATEGORY
-
-# Validate MLBB format
-def validate_mlbb(text):
-    pattern = r'^\d+\s*\(\d+\)$'
-    return bool(re.match(pattern, text))
 
 # Category handler
 async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,7 +244,7 @@ async def select_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Save package and calculate price
     context.user_data['package'] = package
-    context.user_data['price'] = DIAMOND_PRICES[category][package]
+    context.user_data['price'] = helpers.get_diamond_price(category, package)
 
     user_data = helpers.get_user_data(query.from_user.id)
     lang = user_data['language']
@@ -296,6 +338,22 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Confirm to user
     await query.edit_message_caption(
         caption=languages.LANGUAGES[lang]['order_success']
+    )
+    return ConversationHandler.END
+
+# Cancel order
+async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    # Create cancel message based on language
+    cancel_message = "🛑 Order cancelled!" if lang == 'en' else "🛑 အော်ဒါ ပယ်ဖျက်ပြီးပါပြီ!"
+
+    await query.edit_message_caption(
+        caption=cancel_message
     )
     return ConversationHandler.END
 
@@ -408,8 +466,113 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = helpers.get_user_data(user_id)
     lang = user_data['language']
 
+    # Add your username to help text
+    help_text = languages.LANGUAGES[lang]['help_text'].replace(
+        "@NexaMintSupport", 
+        "@Terror_come"
+    )
+
     await update.message.reply_text(
-        languages.LANGUAGES[lang]['help_text'],
+        help_text,
+        disable_web_page_preview=True
+    )
+
+# Handle main menu callbacks
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    if query.data == 'check_order':
+        await check_order_callback(update, context)
+    elif query.data == 'my_orders':
+        await my_orders_callback(update, context)
+    elif query.data == 'help':
+        await help_callback(update, context)
+    return MAIN_MENU
+
+# Check order callback
+async def check_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    orders = helpers.get_user_orders(user_id)
+    if not orders:
+        await query.edit_message_text(
+            text=languages.LANGUAGES[lang]['no_orders'],
+            reply_markup=main_menu_keyboard(lang)
+        )
+        return
+
+    # Get latest order
+    latest_order = sorted(orders, key=lambda x: x['date'], reverse=True)[0]
+
+    response = languages.LANGUAGES[lang]['order_details'].format(
+        latest_order['order_id'],
+        latest_order['status'],
+        latest_order['package'],
+        helpers.format_price(latest_order['price']),
+        latest_order['date']
+    )
+
+    await query.edit_message_text(
+        text=response,
+        reply_markup=main_menu_keyboard(lang)
+    )
+
+# My orders callback
+async def my_orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    orders = helpers.get_user_orders(user_id)[-5:]  # Last 5 orders
+    if not orders:
+        await query.edit_message_text(
+            text=languages.LANGUAGES[lang]['no_orders'],
+            reply_markup=main_menu_keyboard(lang)
+        )
+        return
+
+    response = "📦 Your Last Orders:\n\n"
+    for order in orders:
+        response += languages.LANGUAGES[lang]['order_details'].format(
+            order['order_id'],
+            order['status'],
+            order['package'],
+            helpers.format_price(order['price']),
+            order['date']
+        ) + "\n\n"
+
+    await query.edit_message_text(
+        text=response,
+        reply_markup=main_menu_keyboard(lang)
+    )
+
+# Help callback
+async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_data = helpers.get_user_data(user_id)
+    lang = user_data['language']
+
+    # Add your username to help text
+    help_text = languages.LANGUAGES[lang]['help_text'].replace(
+        "@NexaMintSupport", 
+        "@Terror_come"
+    )
+
+    await query.edit_message_text(
+        text=help_text,
+        reply_markup=main_menu_keyboard(lang),
         disable_web_page_preview=True
     )
 
@@ -462,10 +625,6 @@ async def complete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Main function
 def main():
-    # Initialize data files
-    helpers.save_data({"users": {}, "orders": {}, "next_order_id": 1}, helpers.ORDERS_FILE)
-    helpers.save_data({}, helpers.USER_DATA_FILE)
-
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Conversation handler for customer flow
@@ -475,16 +634,20 @@ def main():
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             LANGUAGE: [CallbackQueryHandler(set_language)],
             MAIN_MENU: [
-                CallbackQueryHandler(start_order, pattern='order'),
-                CallbackQueryHandler(check_order, pattern='check_order'),
-                CallbackQueryHandler(my_orders, pattern='my_orders'),
-                CallbackQueryHandler(help_command, pattern='help')
+                CallbackQueryHandler(start_order, pattern='^order$'),
+                CallbackQueryHandler(handle_main_menu, pattern='^(check_order|my_orders|help)$')
             ],
-            MLBB_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_mlbb_id)],
+            MLBB_ID: [
+                CallbackQueryHandler(get_mlbb_id, pattern='^use_saved|new_id$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_mlbb_id)
+            ],
             CATEGORY: [CallbackQueryHandler(select_category)],
             PACKAGE: [CallbackQueryHandler(select_package)],
             PAYMENT: [MessageHandler(filters.PHOTO, get_payment)],
-            CONFIRM_ORDER: [CallbackQueryHandler(confirm_order, pattern='confirm_order')]
+            CONFIRM_ORDER: [
+                CallbackQueryHandler(confirm_order, pattern='^confirm_order$'),
+                CallbackQueryHandler(cancel_order, pattern='^cancel_order$')
+            ]
         },
         fallbacks=[]
     )
@@ -505,15 +668,14 @@ def main():
     application.add_handler(CommandHandler('help', help_command))
 
     # Rejection reason handler
-    rejection_handler = MessageHandler(
-        filters.TEXT & ~filters.COMMAND, 
-        reject_reason
+    rejection_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_reject, pattern=r'^reject_')],
+        states={
+            ADMIN_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, reject_reason)]
+        },
+        fallbacks=[]
     )
     application.add_handler(rejection_handler)
-
-    # Start keep_alive for Replit
-    from keep_alive import keep_alive
-    keep_alive()
 
     # Start the bot
     application.run_polling()
