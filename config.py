@@ -1,5 +1,7 @@
+import os
+
 # Configuration constants
-BOT_TOKEN ="8003394770:AAHFQhndIsh82ZEwIOzGMYvBSpZKjUi_QPI"
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Get token from environment variable
 ADMIN_GROUP_ID = -1002530649712
 
 # Diamond prices
