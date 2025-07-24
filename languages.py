@@ -42,7 +42,7 @@ LANGUAGES = {
         "order_success": "✅ Order placed successfully! Track status with /checkorder",
         "no_orders": "❌ You have no orders yet",
         "order_details": "Order ID: {}\nStatus: {}\nDiamonds: {}\nPrice: {} MMK\nDate: {}",
-        "help_text": "Contact admin for help: @NexaMintSupport\n\nFAQ:\nQ: Delivery time after payment?\nA: can be delivered in a few minutes\n\nQ: Payment methods?\nA:\nKBZPay - 09978772558 MZK\nUabPay - 09978772558 MZK\nWavePay - 09978772558 SYW\nAYAPay - 09978772558 SYW",
+        "help_text": "Contact admin for help: @NexaMintSupport\n\nFAQ:\nQ: Delivery time after payment?\nA: can be delivered in a few minutes\n\nQ: Payment methods?\nA:\nKBZPay - 09978772558 MZK\nUabPay - 09978772558 MZK\nWavePay - 09978772558 SYW\nAYAPay - 09978772558 SYW\nငွေမလွှဲခင် Updateဈေးများကို @NexaMint Channelမှာ သွားရောက်စစ်‌ဆေးပေးပါ",
         "admin_notification": "🆕 New Order!\n\nUser: {}\nOrder ID: {}\nMLBB ID: {}\nDiamonds: {}\nPrice: {} MMK",
         "order_not_found": "❌ Order ID not found",
         "order_completed": "✅ Order {} completed",
