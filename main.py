@@ -630,7 +630,12 @@ async def complete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Main function
 def main():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = (
+    Application.builder()
+    .token(BOT_TOKEN)
+    .arbitrary_callback_data(True)  # Add this line
+    .build()
+)
 
     # Conversation handler for customer flow
     conv_handler = ConversationHandler(
@@ -657,7 +662,7 @@ def main():
         fallbacks=[]
     )
 
-    application.add_handler(conv_handler)
+    application.add_handler(conv_handler, group=0)
 
     # Admin handlers
     application.add_handler(CommandHandler('pendingorders', pending_orders))
